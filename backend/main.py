@@ -63,12 +63,15 @@ def sync_projects_job():
         print("[sheets] No GOOGLE_SHEETS_URL configured, skipping.")
         return
     try:
-        print("[sheets] Syncing project codes from Google Sheets...")
+        print("[sheets] Fetching URL...")
         resp = _requests.get(s.google_sheets_url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+        print(f"[sheets] HTTP {resp.status_code} — content-type: {resp.headers.get('content-type','?')}")
         resp.raise_for_status()
+        print("[sheets] Decoding content...")
         content = resp.content.decode("utf-8-sig")
         reader = csv.DictReader(io.StringIO(content))
         headers = reader.fieldnames or []
+        print(f"[sheets] CSV headers: {headers}")
         code_col = _find_col(headers, _SHEETS_COLUMN_MAP["code"])
         name_col = _find_col(headers, _SHEETS_COLUMN_MAP["name"])
         desc_col  = _find_col(headers, _SHEETS_COLUMN_MAP["description"])
@@ -82,11 +85,12 @@ def sync_projects_job():
                 continue
             name = row.get(name_col, "").strip() if name_col else ""
             desc = row.get(desc_col, "").strip() if desc_col else ""
+            print(f"[sheets] Upserting {code}...")
             db.upsert_project_code(code, name, desc)
             count += 1
         print(f"[sheets] Synced {count} project codes.")
     except Exception as e:
-        print(f"[sheets] Error syncing from Google Sheets: {e}")
+        print(f"[sheets] ERROR type={type(e).__name__} msg={e}")
 
 
 @asynccontextmanager
