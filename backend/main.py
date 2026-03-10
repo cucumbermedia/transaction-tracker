@@ -64,7 +64,7 @@ def sync_projects_job():
         return
     try:
         print("[sheets] Fetching URL...")
-        resp = _requests.get(s.google_sheets_url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+        resp = _requests.get(s.google_sheets_url.strip(), timeout=30, headers={"User-Agent": "Mozilla/5.0"})
         print(f"[sheets] HTTP {resp.status_code} — content-type: {resp.headers.get('content-type','?')}")
         resp.raise_for_status()
         print("[sheets] Decoding content...")
