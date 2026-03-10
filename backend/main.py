@@ -9,7 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from contextlib import asynccontextmanager
 import csv
 import io
-import urllib.request
+import requests as _requests
 
 import database as db
 import plaid_client
@@ -64,8 +64,9 @@ def sync_projects_job():
         return
     try:
         print("[sheets] Syncing project codes from Google Sheets...")
-        with urllib.request.urlopen(s.google_sheets_url, timeout=30) as resp:
-            content = resp.read().decode("utf-8-sig")
+        resp = _requests.get(s.google_sheets_url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        content = resp.content.decode("utf-8-sig")
         reader = csv.DictReader(io.StringIO(content))
         headers = reader.fieldnames or []
         code_col = _find_col(headers, _SHEETS_COLUMN_MAP["code"])
