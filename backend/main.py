@@ -9,6 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from contextlib import asynccontextmanager
 import csv
 import io
+import urllib.request
 
 import database as db
 import plaid_client
@@ -43,14 +44,61 @@ def run_reminder_job():
             print(f"  [error] {e}")
 
 
+_SHEETS_COLUMN_MAP = {
+    "code":        ["location_code", "Code", "code", "PROJECT_CODE", "ProjectCode", "project_code"],
+    "name":        ["project_name", "Name", "name", "Project Name", "ProjectName"],
+    "description": ["client", "Description", "description", "Notes", "notes"],
+}
+
+def _find_col(headers, candidates):
+    for c in candidates:
+        if c in headers:
+            return c
+    return None
+
+def sync_projects_job():
+    """Fetch project codes from Google Sheets and upsert into Supabase."""
+    s = get_settings()
+    if not s.google_sheets_url:
+        print("[sheets] No GOOGLE_SHEETS_URL configured, skipping.")
+        return
+    try:
+        print("[sheets] Syncing project codes from Google Sheets...")
+        with urllib.request.urlopen(s.google_sheets_url, timeout=30) as resp:
+            content = resp.read().decode("utf-8-sig")
+        reader = csv.DictReader(io.StringIO(content))
+        headers = reader.fieldnames or []
+        code_col = _find_col(headers, _SHEETS_COLUMN_MAP["code"])
+        name_col = _find_col(headers, _SHEETS_COLUMN_MAP["name"])
+        desc_col  = _find_col(headers, _SHEETS_COLUMN_MAP["description"])
+        if not code_col:
+            print(f"[sheets] Could not find code column in: {headers}")
+            return
+        count = 0
+        for row in reader:
+            code = row.get(code_col, "").strip().upper()
+            if not code:
+                continue
+            name = row.get(name_col, "").strip() if name_col else ""
+            desc = row.get(desc_col, "").strip() if desc_col else ""
+            db.upsert_project_code(code, name, desc)
+            count += 1
+        print(f"[sheets] Synced {count} project codes.")
+    except Exception as e:
+        print(f"[sheets] Error syncing from Google Sheets: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Start background scheduler
     scheduler = BackgroundScheduler()
     s = get_settings()
     scheduler.add_job(run_reminder_job, "interval", hours=s.reminder_interval_hours, id="reminders")
+    scheduler.add_job(sync_projects_job, "interval", hours=24, id="sheets_sync")
     scheduler.start()
     print(f"[scheduler] Started — running every {s.reminder_interval_hours} hour(s)")
+    # Sync project codes on startup
+    sync_projects_job()
     yield
     scheduler.shutdown()
 
@@ -314,6 +362,16 @@ def manual_sync():
             twilio_client.send_reminder(txn)
             sent += 1
         return {"ok": True, "reminders_sent": sent}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/admin/sync-projects")
+def manual_sync_projects():
+    """Manually trigger a Google Sheets → Supabase project code sync."""
+    try:
+        sync_projects_job()
+        return {"ok": True, "message": "Project codes synced from Google Sheets"}
     except Exception as e:
         raise HTTPException(500, str(e))
 

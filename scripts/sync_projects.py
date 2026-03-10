@@ -18,9 +18,9 @@ DEFAULT_CSV = r"C:\Users\brand\OneDrive\Desktop\project_registry.csv"
 
 # ─── Adjust these to match your actual CSV column names ──────────────────────
 COLUMN_MAP = {
-    "code":        ["Code", "code", "PROJECT_CODE", "ProjectCode", "project_code"],
-    "name":        ["Name", "name", "Project Name", "ProjectName", "project_name"],
-    "description": ["Description", "description", "Notes", "notes"],
+    "code":        ["location_code", "Code", "code", "PROJECT_CODE", "ProjectCode", "project_code"],
+    "name":        ["project_name", "Name", "name", "Project Name", "ProjectName"],
+    "description": ["client", "Description", "description", "Notes", "notes"],
 }
 # ─────────────────────────────────────────────────────────────────────────────
 

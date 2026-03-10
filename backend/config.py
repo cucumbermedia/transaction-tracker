@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     max_reminders: int = 3
     days_to_look_back: int = 7
     secret_key: str = "change-me"
+    google_sheets_url: str = ""
 
     class Config:
         env_file = ".env"
