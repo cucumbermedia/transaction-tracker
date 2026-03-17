@@ -391,6 +391,29 @@ def sync_accounts():
         raise HTTPException(500, str(e))
 
 
+# ─── Opt-In ───────────────────────────────────────────────────────────────────
+
+@app.post("/api/optin")
+async def optin(request: Request):
+    """Records an SMS opt-in submission from the /opt-in page."""
+    body = await request.json()
+    name = body.get("name", "").strip()
+    phone = body.get("phone", "").strip()
+    if not name or not phone:
+        raise HTTPException(400, "name and phone are required")
+    # Normalize to E.164 if needed
+    digits = "".join(c for c in phone if c.isdigit())
+    if len(digits) == 10:
+        phone_e164 = f"+1{digits}"
+    elif len(digits) == 11 and digits.startswith("1"):
+        phone_e164 = f"+{digits}"
+    else:
+        raise HTTPException(400, "Invalid phone number")
+    print(f"[optin] {name} — {phone_e164}")
+    db.log_optin(name, phone_e164)
+    return {"ok": True}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

@@ -195,3 +195,18 @@ def get_pending(phone: str) -> str | None:
 
 def clear_pending(phone: str) -> None:
     _pending_state.pop(phone, None)
+
+
+# ─── Opt-In Log ───────────────────────────────────────────────────────────────
+
+def log_optin(name: str, phone: str) -> None:
+    """Record an SMS opt-in from the /opt-in page. Requires opt_ins table in Supabase.
+    SQL: CREATE TABLE opt_ins (id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+         name text, phone text, created_at timestamptz DEFAULT now());
+    """
+    try:
+        get_db().table("opt_ins").insert({"name": name, "phone": phone}).execute()
+    except Exception as e:
+        # Don't fail the request if the table doesn't exist yet — just log it
+        print(f"[optin] DB insert failed (table may not exist yet): {e}")
+        print(f"[optin] Recorded: {name} — {phone}")
