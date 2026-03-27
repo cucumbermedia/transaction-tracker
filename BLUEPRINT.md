@@ -1,4 +1,4 @@
-# Masterson Transaction Tracker — System Codex
+# Masterson Transaction Tracker — Blueprint
 
 ## Purpose
 Automatically pulls Capital One Spark business credit card transactions via Plaid, sends SMS reminders (via Twilio) to the employee who made each purchase asking them to associate it with a project code and reply with a receipt photo. A React dashboard lets admins/bookkeepers review, manually code, and export transactions.
@@ -40,7 +40,10 @@ Capital One Spark
 | Backend (local dev) | `cd backend && uvicorn main:app --reload` |
 | Frontend (local dev) | `cd frontend && npm run dev` |
 | Frontend (production) | https://transaction-tracker-wheat.vercel.app |
-| Backend (production) | Railway app URL (set as `VITE_API_URL` in Vercel) |
+| Backend (production) | https://transaction-tracker-production-0eda.up.railway.app |
+| SMS Opt-In page | https://transaction-tracker-wheat.vercel.app/opt-in |
+| Privacy Policy | https://transaction-tracker-wheat.vercel.app/privacy |
+| Terms & Conditions | https://transaction-tracker-wheat.vercel.app/terms |
 | Manual Plaid link (one-time) | `python scripts/plaid_link.py` |
 | Sync project codes from CSV | `python scripts/sync_projects.py --csv path/to/file.csv` |
 
@@ -124,6 +127,10 @@ Capital One Spark
 **`sms_log`** — Full audit trail of all SMS in/out
 - `id`, `transaction_id` (fk), `direction` (`outbound`/`inbound`), `from_number`, `to_number`, `body`, `media_url`, `twilio_sid`, `created_at`
 
+**`opt_ins`** — Records web form opt-in submissions from `/opt-in` page
+- `id` (uuid), `name`, `phone` (E.164), `created_at`
+- SQL: `CREATE TABLE opt_ins (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text, phone text, created_at timestamptz DEFAULT now());`
+
 **Indexes:** `date DESC`, `project_code IS NULL` (uncoded), `employee_id`, `card_last4`
 
 ---
@@ -143,6 +150,7 @@ Capital One Spark
 | POST | `/api/admin/sync` | Manual: Plaid fetch + send reminders |
 | POST | `/api/admin/sync-projects` | Manual: Google Sheets project sync |
 | POST | `/api/admin/sync-accounts` | Manual: Populate plaid_accounts from Plaid |
+| POST | `/api/optin` | Record SMS opt-in submission (name + phone → opt_ins table) |
 
 ---
 
@@ -151,7 +159,7 @@ Capital One Spark
 | Service | Role | Config Location | Notes |
 |---------|------|----------------|-------|
 | **Plaid** | Pull Capital One transactions | `backend/.env` | Webhook URL: `{railway_url}/webhook/plaid` |
-| **Twilio** | Send/receive SMS + MMS | `backend/.env` | Webhook URL: `{railway_url}/webhook/twilio` — **A2P pending** |
+| **Twilio** | Send/receive SMS + MMS | `backend/.env` | Webhook URL: `{railway_url}/webhook/twilio` — **A2P under manual review by compliance team (2026-03)** |
 | **Supabase** | PostgreSQL database + receipt photo storage | `backend/.env` | Run `supabase/schema.sql` on new project |
 | **Railway** | Backend hosting | Environment variables in Railway dashboard | Deploy from `backend/` directory |
 | **Vercel** | Frontend hosting | `VITE_API_URL` env var | Deploy from `frontend/` directory |
@@ -162,7 +170,7 @@ Capital One Spark
 
 ## Known Limitations / Pending
 
-- **Twilio A2P registration pending (as of 2026-03)** — SMS reminders will not send to real numbers until A2P is approved. This is the main blocker for full production use.
+- **Twilio A2P under manual compliance review (as of 2026-03)** — Campaign SID: `CMba4e7a9f095ce05459503ebdae3489b7`. Escalated to Twilio compliance team (Monica) after multiple automated rejections. Opt-in page, privacy policy (with required SMS data sharing statement), and terms page all live. Two opt-in methods documented: web form + texting START to (707) 343-4630. SMS will not send to real numbers until approved.
 - **CORS is open** — `allow_origins=["*"]` in `main.py`. Should be locked to Vercel URL in production.
 - **No authentication on API routes** — Anyone with the Railway URL can read/modify transactions. Consider adding an API key or auth layer.
 - **Pending state is in-memory** — Restarting the Railway backend clears the in-memory pending transaction tracker. Would need Redis for true production resilience.
