@@ -15,7 +15,6 @@ def _get_client() -> plaid_api.PlaidApi:
     s = get_settings()
     env_map = {
         "sandbox": plaid.Environment.Sandbox,
-        "development": plaid.Environment.Development,
         "production": plaid.Environment.Production,
     }
     config = plaid.Configuration(
