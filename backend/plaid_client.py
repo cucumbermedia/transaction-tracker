@@ -66,10 +66,10 @@ def fetch_and_store_transactions(days_back: int = 7) -> list[dict]:
         if txn["amount"] <= 0:
             continue
 
-        # Look up which card/employee this account belongs to
-        account_info = db.get_plaid_account(txn["account_id"])
-        card_last4 = account_info["card_last4"] if account_info else None
-        employee_id = account_info["employee_id"] if account_info else None
+        # Use account_owner field which contains the card last 4 for each authorized user
+        card_last4 = txn.get("account_owner") or None
+        employee = db.get_employee_by_card(card_last4) if card_last4 else None
+        employee_id = employee["id"] if employee else None
 
         row = {
             "plaid_transaction_id": txn["transaction_id"],
