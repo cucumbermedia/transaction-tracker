@@ -20,14 +20,20 @@ def get_all_employees() -> list[dict]:
 
 
 def get_employee_by_card(card_last4: str) -> dict | None:
+    """Only returns active employees — inactive employees won't receive texts."""
     db = get_db()
-    rows = db.table("employees").select("*").eq("card_last4", card_last4).execute().data
+    rows = (db.table("employees").select("*")
+            .eq("card_last4", card_last4)
+            .eq("is_active", True)
+            .execute().data)
     return rows[0] if rows else None
 
 
 def get_employee_by_phone(phone: str) -> dict | None:
     db = get_db()
-    rows = db.table("employees").select("*").eq("phone_number", phone).execute().data
+    rows = (db.table("employees").select("*")
+            .eq("phone_number", phone)
+            .execute().data)
     return rows[0] if rows else None
 
 
@@ -165,10 +171,11 @@ def get_uncoded_transactions_due_reminder(interval_hours: int = 24, max_reminder
 
     rows = (
         db.table("transactions")
-        .select("*, employees(name, phone_number, card_last4)")
+        .select("*, employees!inner(name, phone_number, card_last4, is_active)")
         .is_("project_code", "null")
         .lt("reminder_count", max_reminders)
         .or_(f"reminder_sent_at.is.null,reminder_sent_at.lt.{cutoff}")
+        .eq("employees.is_active", True)
         .order("date", desc=False)  # oldest first
         .execute()
         .data
