@@ -371,6 +371,25 @@ def manual_sync():
         raise HTTPException(500, str(e))
 
 
+@app.get("/api/admin/plaid-debug")
+def plaid_debug():
+    """Return raw Plaid transaction data for the last 3 transactions to inspect available fields."""
+    import datetime
+    s = get_settings()
+    client = plaid_client._get_client()
+    from plaid.model.transactions_get_request import TransactionsGetRequest
+    from plaid.model.transactions_get_request_options import TransactionsGetRequestOptions
+    import datetime as dt
+    req = TransactionsGetRequest(
+        access_token=s.plaid_access_token,
+        start_date=dt.date.today() - dt.timedelta(days=30),
+        end_date=dt.date.today(),
+        options=TransactionsGetRequestOptions(count=3)
+    )
+    resp = client.transactions_get(req)
+    return {"transactions": [dict(t) for t in resp["transactions"]]}
+
+
 @app.post("/api/admin/sync-projects")
 def manual_sync_projects():
     """Manually trigger a Google Sheets → Supabase project code sync."""
