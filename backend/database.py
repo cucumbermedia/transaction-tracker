@@ -150,7 +150,7 @@ def get_next_uncoded_for_employee(employee_id: str | None) -> dict | None:
     q = (db.table("transactions")
          .select("*, employees(name, phone_number, card_last4)")
          .is_("project_code", "null")
-         .order("date", desc=False)
+         .order("date", desc=True)
          .limit(1))
     if employee_id:
         q = q.eq("employee_id", employee_id)
@@ -176,12 +176,12 @@ def get_uncoded_transactions_due_reminder(interval_hours: int = 24, max_reminder
         .lt("reminder_count", max_reminders)
         .or_(f"reminder_sent_at.is.null,reminder_sent_at.lt.{cutoff}")
         .eq("employees.is_active", True)
-        .order("date", desc=False)  # oldest first
+        .order("date", desc=True)  # newest first
         .execute()
         .data
     )
 
-    # Only 1 per employee — their oldest uncoded transaction
+    # Only 1 per employee — their newest uncoded transaction
     seen: set[str] = set()
     result = []
     for txn in rows:
