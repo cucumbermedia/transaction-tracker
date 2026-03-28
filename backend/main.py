@@ -371,6 +371,31 @@ def manual_sync():
         raise HTTPException(500, str(e))
 
 
+@app.post("/api/admin/remap-employees")
+def remap_employees():
+    """Re-map card_last4 and employee_id on existing transactions using Plaid account_owner field."""
+    import datetime as dt
+    from plaid.model.transactions_get_request import TransactionsGetRequest
+    from plaid.model.transactions_get_request_options import TransactionsGetRequestOptions
+    s = get_settings()
+    client = plaid_client._get_client()
+    req = TransactionsGetRequest(
+        access_token=s.plaid_access_token,
+        start_date=dt.date.today() - dt.timedelta(days=s.days_to_look_back),
+        end_date=dt.date.today(),
+        options=TransactionsGetRequestOptions(count=500)
+    )
+    resp = client.transactions_get(req)
+    updated = 0
+    for txn in resp["transactions"]:
+        card_last4 = txn.get("account_owner") or None
+        employee = db.get_employee_by_card(card_last4) if card_last4 else None
+        employee_id = employee["id"] if employee else None
+        db.remap_transaction_employee(txn["transaction_id"], card_last4, employee_id)
+        updated += 1
+    return {"ok": True, "updated": updated}
+
+
 @app.get("/api/admin/plaid-debug")
 def plaid_debug():
     """Return raw Plaid transaction data for the last 3 transactions to inspect available fields."""

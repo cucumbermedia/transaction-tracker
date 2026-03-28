@@ -87,6 +87,15 @@ def upsert_transaction(txn: dict) -> dict:
     return db.table("transactions").upsert(txn, on_conflict="plaid_transaction_id", ignore_duplicates=True).execute().data
 
 
+def remap_transaction_employee(plaid_transaction_id: str, card_last4: str, employee_id: str | None) -> None:
+    """Update card_last4 and employee_id on an existing transaction without touching project codes."""
+    db = get_db()
+    db.table("transactions").update({
+        "card_last4": card_last4,
+        "employee_id": employee_id
+    }).eq("plaid_transaction_id", plaid_transaction_id).execute()
+
+
 def get_transactions(
     limit: int = 100,
     offset: int = 0,
