@@ -374,12 +374,11 @@ def manual_sync():
 @app.get("/api/admin/plaid-debug")
 def plaid_debug():
     """Return raw Plaid transaction data for the last 3 transactions to inspect available fields."""
-    import datetime
-    s = get_settings()
-    client = plaid_client._get_client()
+    import datetime as dt
     from plaid.model.transactions_get_request import TransactionsGetRequest
     from plaid.model.transactions_get_request_options import TransactionsGetRequestOptions
-    import datetime as dt
+    s = get_settings()
+    client = plaid_client._get_client()
     req = TransactionsGetRequest(
         access_token=s.plaid_access_token,
         start_date=dt.date.today() - dt.timedelta(days=30),
@@ -387,7 +386,19 @@ def plaid_debug():
         options=TransactionsGetRequestOptions(count=3)
     )
     resp = client.transactions_get(req)
-    return {"transactions": [dict(t) for t in resp["transactions"]]}
+    results = []
+    for t in resp["transactions"]:
+        results.append({
+            "transaction_id": t.get("transaction_id"),
+            "merchant_name": t.get("merchant_name"),
+            "amount": t.get("amount"),
+            "date": str(t.get("date")),
+            "account_id": t.get("account_id"),
+            "account_owner": t.get("account_owner"),
+            "payment_channel": t.get("payment_channel"),
+            "payment_meta": str(t.get("payment_meta")),
+        })
+    return {"transactions": results}
 
 
 @app.post("/api/admin/sync-projects")
