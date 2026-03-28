@@ -42,7 +42,10 @@ def send_reminder(txn: dict) -> str | None:
 
     # Determine who to text
     employee = txn.get("employees")
-    if employee and employee.get("phone_number"):
+    if s.test_mode:
+        # Test mode — all texts go to admin only
+        to_phone = s.admin_phone
+    elif employee and employee.get("phone_number"):
         to_phone = employee["phone_number"]
     else:
         # No employee mapped → send to admin (Brandon)

@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     days_to_look_back: int = 7
     secret_key: str = "change-me"
     google_sheets_url: str = ""
+    test_mode: bool = False  # When True, all SMS go to admin_phone only
 
     class Config:
         env_file = ".env"
