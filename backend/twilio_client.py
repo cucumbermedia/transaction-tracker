@@ -13,29 +13,32 @@ def _get_client() -> TwilioClient:
     return TwilioClient(s.twilio_account_sid, s.twilio_auth_token)
 
 
-def _format_reminder(txn: dict, project_codes: list[dict]) -> str:
-    """Build the SMS reminder text."""
+def _format_reminder(txn: dict, project_codes: list[dict], position: int = 1, total: int = 1) -> str:
+    """Build the SMS reminder text with queue position."""
     merchant = txn.get("merchant_name") or txn.get("description") or "Unknown Merchant"
     amount = f"${txn['amount']:.2f}"
     date_str = txn["date"]
-    last4 = txn.get("card_last4", "????")
     codes_preview = ", ".join([p["code"] for p in project_codes[:8]])
     if len(project_codes) > 8:
-        codes_preview += f" ... (+{len(project_codes)-8} more)"
+        codes_preview += f" (+{len(project_codes)-8} more)"
+
+    queue_line = f"#{position} of {total} transactions" if total > 1 else "transaction"
 
     return (
-        f"[Masterson] Uncoded transaction needs a project code:\n"
+        f"[Masterson] Uncoded {queue_line}:\n"
         f"📍 {merchant}\n"
-        f"💰 {amount}  |  📅 {date_str}  |  Card: ****{last4}\n\n"
-        f"Reply with your project code + attach a photo of the receipt.\n"
+        f"💰 {amount}  |  📅 {date_str}\n\n"
+        f"Reply with project code + receipt photo.\n"
+        f"OPS = Masterson Operations\n"
         f"Example: JL\n\n"
-        f"Active codes: {codes_preview}"
+        f"Codes: {codes_preview}"
     )
 
 
-def send_reminder(txn: dict) -> str | None:
+def send_reminder(txn: dict, position: int = 1, total: int = 1) -> str | None:
     """
     Send an SMS reminder for an uncoded transaction.
+    position/total used for queue messaging (e.g. '#1 of 3 transactions').
     Returns Twilio message SID or None if no phone to send to.
     """
     s = get_settings()
@@ -43,16 +46,14 @@ def send_reminder(txn: dict) -> str | None:
     # Determine who to text
     employee = txn.get("employees")
     if s.test_mode:
-        # Test mode — all texts go to admin only
         to_phone = s.admin_phone
     elif employee and employee.get("phone_number"):
         to_phone = employee["phone_number"]
     else:
-        # No employee mapped → send to admin (Brandon)
         to_phone = s.admin_phone
 
     project_codes = db.get_all_project_codes()
-    body = _format_reminder(txn, project_codes)
+    body = _format_reminder(txn, project_codes, position, total)
 
     client = _get_client()
     message = client.messages.create(
@@ -61,7 +62,6 @@ def send_reminder(txn: dict) -> str | None:
         to=to_phone
     )
 
-    # Log it
     db.log_sms(
         direction="outbound",
         from_number=s.twilio_phone_number,
@@ -71,10 +71,7 @@ def send_reminder(txn: dict) -> str | None:
         twilio_sid=message.sid
     )
 
-    # Mark reminder sent
     db.mark_reminder_sent(txn["id"], txn.get("reminder_count", 0))
-
-    # Store pending state so we know what this person is replying to
     db.set_pending(to_phone, txn["id"])
 
     return message.sid

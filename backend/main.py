@@ -38,8 +38,9 @@ def run_reminder_job():
     print(f"[scheduler] {len(due)} transactions need reminders")
     for txn in due:
         try:
-            sid = twilio_client.send_reminder(txn)
-            print(f"  → Reminded for txn {txn['id']} (merchant: {txn.get('merchant_name')}) → SID {sid}")
+            total = txn.get("total_uncoded", 1)
+            sid = twilio_client.send_reminder(txn, position=1, total=total)
+            print(f"  → Reminded for txn {txn['id']} (merchant: {txn.get('merchant_name')}) queue {1}/{total} → SID {sid}")
         except Exception as e:
             print(f"  [error] {e}")
 
@@ -222,20 +223,30 @@ async def twilio_webhook(
     # Parse the project code from their reply
     code = twilio_client.parse_project_code_from_reply(reply_body)
 
+    # If no exact code match, try fuzzy match on project name
     if not code:
+        project = db.get_project_by_name_fuzzy(reply_body)
+        if project:
+            code = project["code"]
+            print(f"[twilio] Fuzzy matched '{reply_body}' → {code} ({project['name']})")
+
+    if not code:
+        # Store raw reply for admin review — don't block the employee
+        db.store_raw_reply(txn_id, reply_body)
         twilio_client.send_sms(
             from_phone,
-            "Couldn't read a project code from your reply. Please reply with just the code, like: JL"
+            f"Code not recognized. Saved for review — Brandon will follow up.\n"
+            f"Or reply with a valid code (e.g. JL) or OPS for Masterson Operations."
         )
         return {"ok": True}
 
     # Validate code
     if not db.is_valid_project_code(code):
         codes = db.get_all_project_codes()
-        code_list = ", ".join([p["code"] for p in codes])
+        code_list = ", ".join([p["code"] for p in codes[:10]])
         twilio_client.send_sms(
             from_phone,
-            f"'{code}' is not a valid project code. Valid codes: {code_list}\n\nReply again with the correct code."
+            f"'{code}' is not a valid project code.\nValid codes: {code_list}\n\nReply with the correct code."
         )
         return {"ok": True}
 
@@ -249,11 +260,29 @@ async def twilio_webhook(
     db.clear_pending(from_phone)
 
     merchant = txn.get("merchant_name") or txn.get("description") or "that transaction"
-    receipt_note = " Receipt saved ✅" if receipt_url else " (No receipt attached — remember to keep receipts!)"
-    twilio_client.send_sms(
-        from_phone,
-        f"Got it! {merchant} → coded as {code}.{receipt_note}"
-    )
+    receipt_note = " Receipt saved ✅" if receipt_url else ""
+
+    # Check if there are more uncoded transactions in the queue
+    employee_id = txn.get("employee_id")
+    remaining = db.get_uncoded_count_for_employee(employee_id)
+
+    if remaining == 0:
+        twilio_client.send_sms(
+            from_phone,
+            f"Got it! {merchant} → {code} ✓{receipt_note}\n\nAll transactions coded! You're all caught up 🎉"
+        )
+    else:
+        # Immediately send next transaction in queue
+        next_txn = db.get_next_uncoded_for_employee(employee_id)
+        if next_txn:
+            confirm_msg = f"Got it! {merchant} → {code} ✓{receipt_note}\n\n{remaining} more to go:"
+            twilio_client.send_sms(from_phone, confirm_msg)
+            twilio_client.send_reminder(next_txn, position=1, total=remaining)
+        else:
+            twilio_client.send_sms(
+                from_phone,
+                f"Got it! {merchant} → {code} ✓{receipt_note}"
+            )
 
     return {"ok": True}
 
@@ -364,7 +393,8 @@ def manual_sync():
         due = db.get_uncoded_transactions_due_reminder(interval_hours=0, max_reminders=s.max_reminders)
         sent = 0
         for txn in due:
-            twilio_client.send_reminder(txn)
+            total = txn.get("total_uncoded", 1)
+            twilio_client.send_reminder(txn, position=1, total=total)
             sent += 1
         return {"ok": True, "reminders_sent": sent}
     except Exception as e:

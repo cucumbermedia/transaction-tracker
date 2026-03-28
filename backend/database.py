@@ -128,23 +128,80 @@ def get_transaction_by_id(txn_id: str) -> dict | None:
     return rows[0] if rows else None
 
 
-def get_uncoded_transactions_due_reminder(interval_hours: int = 24, max_reminders: int = 3) -> list[dict]:
-    """Fetch uncoded transactions that need a reminder sent."""
+def get_uncoded_count_for_employee(employee_id: str | None) -> int:
+    """Count uncoded transactions for an employee."""
+    db = get_db()
+    if employee_id:
+        result = db.table("transactions").select("id", count="exact").is_("project_code", "null").eq("employee_id", employee_id).execute()
+    else:
+        result = db.table("transactions").select("id", count="exact").is_("project_code", "null").is_("employee_id", "null").execute()
+    return result.count or 0
+
+
+def get_next_uncoded_for_employee(employee_id: str | None) -> dict | None:
+    """Get the oldest uncoded transaction for an employee (next in queue)."""
+    db = get_db()
+    q = (db.table("transactions")
+         .select("*, employees(name, phone_number, card_last4)")
+         .is_("project_code", "null")
+         .order("date", desc=False)
+         .limit(1))
+    if employee_id:
+        q = q.eq("employee_id", employee_id)
+    else:
+        q = q.is_("employee_id", "null")
+    rows = q.execute().data
+    return rows[0] if rows else None
+
+
+def get_uncoded_transactions_due_reminder(interval_hours: int = 24, max_reminders: int = 365) -> list[dict]:
+    """
+    For each employee, return their OLDEST uncoded transaction due a reminder.
+    Includes total_uncoded count for queue messaging. One per employee max.
+    """
     from datetime import datetime, timedelta, timezone
     db = get_db()
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=interval_hours)).isoformat()
 
-    # Uncoded + (never reminded OR last reminder was > interval_hours ago) + under max_reminders
     rows = (
         db.table("transactions")
-        .select("*, employees(name, phone_number)")
+        .select("*, employees(name, phone_number, card_last4)")
         .is_("project_code", "null")
         .lt("reminder_count", max_reminders)
         .or_(f"reminder_sent_at.is.null,reminder_sent_at.lt.{cutoff}")
+        .order("date", desc=False)  # oldest first
         .execute()
         .data
     )
-    return rows
+
+    # Only 1 per employee — their oldest uncoded transaction
+    seen: set[str] = set()
+    result = []
+    for txn in rows:
+        key = txn.get("employee_id") or "admin"
+        if key not in seen:
+            seen.add(key)
+            txn["total_uncoded"] = get_uncoded_count_for_employee(txn.get("employee_id"))
+            result.append(txn)
+    return result
+
+
+def store_raw_reply(txn_id: str, raw_text: str) -> None:
+    """Store a raw SMS reply that couldn't be matched to a project code."""
+    get_db().table("transactions").update({"raw_reply": raw_text}).eq("id", txn_id).execute()
+
+
+def get_project_by_name_fuzzy(text: str) -> dict | None:
+    """Find a project code by fuzzy name match (case-insensitive contains)."""
+    db = get_db()
+    rows = (db.table("project_codes")
+            .select("*")
+            .eq("is_active", True)
+            .ilike("name", f"%{text.strip()}%")
+            .limit(1)
+            .execute()
+            .data)
+    return rows[0] if rows else None
 
 
 def assign_project_code(txn_id: str, code: str, receipt_url: str | None, coded_by: str = "sms") -> dict:
@@ -186,24 +243,24 @@ def log_sms(direction: str, from_number: str, to_number: str, body: str,
     }).execute()
 
 
-# ─── Pending SMS State ─────────────────────────────────────────────────────────
-# Tracks which transaction a person is currently being asked about
-# Uses a simple in-memory dict keyed by phone number → transaction_id
-# For production, this could be a Redis key or a Supabase table
-
-_pending_state: dict[str, str] = {}   # phone → transaction_id
-
+# ─── Pending SMS State (Supabase-backed, survives restarts) ───────────────────
 
 def set_pending(phone: str, txn_id: str) -> None:
-    _pending_state[phone] = txn_id
+    from datetime import datetime, timezone
+    get_db().table("pending_sms").upsert({
+        "phone": phone,
+        "txn_id": txn_id,
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }, on_conflict="phone").execute()
 
 
 def get_pending(phone: str) -> str | None:
-    return _pending_state.get(phone)
+    rows = get_db().table("pending_sms").select("txn_id").eq("phone", phone).execute().data
+    return rows[0]["txn_id"] if rows else None
 
 
 def clear_pending(phone: str) -> None:
-    _pending_state.pop(phone, None)
+    get_db().table("pending_sms").delete().eq("phone", phone).execute()
 
 
 # ─── Opt-In Log ───────────────────────────────────────────────────────────────
