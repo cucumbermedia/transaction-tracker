@@ -41,7 +41,7 @@ def fetch_and_store_transactions(days_back: int = 7) -> list[dict]:
         access_token=s.plaid_access_token,
         start_date=start_date,
         end_date=end_date,
-        options=TransactionsGetRequestOptions(count=500)
+        options=TransactionsGetRequestOptions(count=500, include_pending=True)
     )
     response = client.transactions_get(request)
     transactions = response["transactions"]
@@ -54,7 +54,8 @@ def fetch_and_store_transactions(days_back: int = 7) -> list[dict]:
             end_date=end_date,
             options=TransactionsGetRequestOptions(
                 count=500,
-                offset=len(transactions)
+                offset=len(transactions),
+                include_pending=True
             )
         )
         response = client.transactions_get(request)
@@ -66,10 +67,23 @@ def fetch_and_store_transactions(days_back: int = 7) -> list[dict]:
         if txn["amount"] <= 0:
             continue
 
+        is_pending = txn.get("pending", False)
+
         # Use account_owner field which contains the card last 4 for each authorized user
         card_last4 = txn.get("account_owner") or None
         employee = db.get_employee_by_card(card_last4) if card_last4 else None
         employee_id = employee["id"] if employee else None
+
+        # If this settled transaction was previously pending, update the existing record
+        pending_txn_id = txn.get("pending_transaction_id")
+        if pending_txn_id and not is_pending:
+            updated = db.settle_pending_transaction(
+                pending_plaid_id=pending_txn_id,
+                settled_plaid_id=txn["transaction_id"]
+            )
+            if updated:
+                print(f"[plaid] Settled pending txn {pending_txn_id} → {txn['transaction_id']}")
+                continue  # Already in DB, don't re-insert
 
         row = {
             "plaid_transaction_id": txn["transaction_id"],
@@ -80,6 +94,7 @@ def fetch_and_store_transactions(days_back: int = 7) -> list[dict]:
             "amount": float(txn["amount"]),
             "card_last4": card_last4,
             "employee_id": employee_id,
+            "is_pending": is_pending,
         }
         result = db.upsert_transaction(row)
         if result:

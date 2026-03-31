@@ -93,6 +93,19 @@ def upsert_transaction(txn: dict) -> dict:
     return db.table("transactions").upsert(txn, on_conflict="plaid_transaction_id", ignore_duplicates=True).execute().data
 
 
+def settle_pending_transaction(pending_plaid_id: str, settled_plaid_id: str) -> bool:
+    """When a pending transaction settles, update the existing record with the new ID."""
+    db = get_db()
+    rows = db.table("transactions").select("id").eq("plaid_transaction_id", pending_plaid_id).execute().data
+    if not rows:
+        return False
+    db.table("transactions").update({
+        "plaid_transaction_id": settled_plaid_id,
+        "is_pending": False,
+    }).eq("plaid_transaction_id", pending_plaid_id).execute()
+    return True
+
+
 def remap_transaction_employee(plaid_transaction_id: str, card_last4: str, employee_id: str | None) -> None:
     """Update card_last4 and employee_id on an existing transaction without touching project codes."""
     db = get_db()
