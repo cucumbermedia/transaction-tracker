@@ -41,7 +41,7 @@ def fetch_and_store_transactions(days_back: int = 7) -> list[dict]:
         access_token=s.plaid_access_token,
         start_date=start_date,
         end_date=end_date,
-        options=TransactionsGetRequestOptions(count=500, include_pending=True)
+        options=TransactionsGetRequestOptions(count=500)
     )
     response = client.transactions_get(request)
     transactions = response["transactions"]
@@ -54,8 +54,7 @@ def fetch_and_store_transactions(days_back: int = 7) -> list[dict]:
             end_date=end_date,
             options=TransactionsGetRequestOptions(
                 count=500,
-                offset=len(transactions),
-                include_pending=True
+                offset=len(transactions)
             )
         )
         response = client.transactions_get(request)
