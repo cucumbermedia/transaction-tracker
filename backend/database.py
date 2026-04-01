@@ -88,9 +88,24 @@ def get_plaid_account(plaid_account_id: str) -> dict | None:
 # ─── Transactions ──────────────────────────────────────────────────────────────
 
 def upsert_transaction(txn: dict) -> dict:
-    """Insert or skip a transaction (plaid_transaction_id is unique)."""
+    """
+    Insert a new transaction, or update employee_id/card_last4 if it already exists
+    but hasn't been mapped to an employee yet. Never overwrites project codes.
+    """
     db = get_db()
-    return db.table("transactions").upsert(txn, on_conflict="plaid_transaction_id", ignore_duplicates=True).execute().data
+    plaid_id = txn["plaid_transaction_id"]
+
+    # Try insert first (ignore if already exists)
+    result = db.table("transactions").upsert(txn, on_conflict="plaid_transaction_id", ignore_duplicates=True).execute().data
+
+    # If employee_id is set, patch any existing row that still has employee_id=NULL
+    if txn.get("employee_id"):
+        db.table("transactions").update({
+            "employee_id": txn["employee_id"],
+            "card_last4": txn.get("card_last4"),
+        }).eq("plaid_transaction_id", plaid_id).is_("employee_id", "null").execute()
+
+    return result
 
 
 def settle_pending_transaction(pending_plaid_id: str, settled_plaid_id: str) -> bool:
@@ -186,7 +201,8 @@ def get_uncoded_transactions_due_reminder(interval_hours: int = 24, max_reminder
         db.table("transactions")
         .select("*, employees!inner(name, phone_number, card_last4, is_active)")
         .is_("project_code", "null")
-        .lt("reminder_count", max_reminders)
+        # NULL reminder_count means never reminded — treat same as 0 (< max_reminders)
+        .or_(f"reminder_count.is.null,reminder_count.lt.{max_reminders}")
         .or_(f"reminder_sent_at.is.null,reminder_sent_at.lt.{cutoff}")
         .eq("employees.is_active", True)
         .order("date", desc=True)  # newest first
